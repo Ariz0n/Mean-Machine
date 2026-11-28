@@ -1,4 +1,4 @@
-# Одометрия T4 - вся логика (без ROS, чтобы можно было тестировать)
+# Одометрия T4 - вся логика (без ROS)
 #
 # Поворот робота берем из IMU.
 # Положение x, y находим по лидару: накладываем скан на карту стен (icp.py).
@@ -17,6 +17,9 @@ NEW_PLACE = 0.20        # добавляем скан в карту, если р
 NEW_TURN = math.radians(10)   # или повернулся на столько
 MAX_STEP = 0.15         # больше за один скан (0.05 с) робот сдвинуться не может, м
 MAX_AHEAD = 0.1         # между сканами досчитываем по скорости не дольше этого, с
+TRUNK_HEIGHT = 0.29     # высота корпуса над полом, когда собака стоит (для облака точек T5), м
+FLOOR = 0.12            # точка скана ниже этого над полом - это пол, а не препятствие, м
+CLOUD_RANGE = 6.0       # в облако для Nav2 берем точки не дальше этого от лидара, м
 
 
 def rotation_matrix(q):
@@ -60,6 +63,9 @@ class Odom:
         self.map_pos = None       # где робот был, когда последний раз пополняли карту
         self.map_yaw = None
         self.count = {'scans': 0, 'matched': 0, 'failed': 0, 'keyframes': 0}
+        self.points3d = np.zeros((0, 3))   # точки текущего скана (относительно робота) без пола
+        self.cloud = None         # точки последнего скана в odom (x, y, z) без пола - для карт Nav2 в T5
+        self.cloud_time = None
 
     def imu(self, q):
         # пришел поворот из IMU. Битый кватернион пропускаем - остается прошлый
@@ -80,6 +86,9 @@ class Odom:
         points = np.stack([r * np.cos(angle), r * np.sin(angle), np.zeros(len(r))], axis=1) + LIDAR_POS
         # поворачиваем как повернут корпус (с наклоном - при ходьбе корпус качается)
         points = points @ rotation_matrix(self.q).T
+        # для карт Nav2 (T5): точки выше пола. При качке луч через несколько метров задевает пол -
+        # такие точки не препятствия
+        self.points3d = points[(points[:, 2] + TRUNK_HEIGHT > FLOOR) & (r < CLOUD_RANGE)]
         return thin_out(points[:, :2])
 
     def scan(self, t, ranges, angle_min, angle_step):
@@ -120,6 +129,9 @@ class Odom:
             self.vel = 0.7 * self.vel + 0.3 * (new_pos - self.pos) / dt
         self.pos = new_pos
         self.scan_time = t
+        # в системе odom корпус на высоте z = 0, поэтому z точек - высота относительно корпуса
+        self.cloud = self.points3d + np.array([self.pos[0], self.pos[1], 0.0])
+        self.cloud_time = t
 
         # робот сдвинулся или повернулся достаточно - добавляем скан в карту
         moved = np.linalg.norm(self.pos - self.map_pos) > NEW_PLACE

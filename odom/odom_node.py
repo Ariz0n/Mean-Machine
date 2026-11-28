@@ -18,7 +18,9 @@ from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import Imu, LaserScan
+from sensor_msgs.msg import Imu, LaserScan, PointCloud2
+from sensor_msgs_py import point_cloud2
+from std_msgs.msg import Header
 from tf2_ros import TransformBroadcaster
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -51,6 +53,13 @@ class OdomNode(Node):
 
         self.pub = self.create_publisher(Odometry, '/odom', 10)
         self.tf = TransformBroadcaster(self)
+
+        # T5: точки скана сразу в системе odom (без пола) для карт стоимости Nav2.
+        # В T4 выключено (параметр cloud по умолчанию false).
+        self.declare_parameter('cloud', False)
+        self.cloud_pub = None
+        if self.get_parameter('cloud').value:
+            self.cloud_pub = self.create_publisher(PointCloud2, '/scan_cloud', 10)
         self.create_timer(1.0 / RATE, self.on_timer, callback_group=main_thread)   # таймер по времени симуляции
 
         self.get_logger().info(f'odom node started, rate {RATE:.0f} hz sim time, imu orientation + lidar icp')
@@ -70,6 +79,10 @@ class OdomNode(Node):
         except Exception as e:
             # один плохой скан не должен ронять узел
             self.get_logger().warn(f'scan failed: {e!r}', throttle_duration_sec=5.0)
+            return
+        if self.cloud_pub is not None and self.odom.cloud_time == t and len(self.odom.cloud):
+            header = Header(stamp=msg.header.stamp, frame_id='odom')
+            self.cloud_pub.publish(point_cloud2.create_cloud_xyz32(header, self.odom.cloud.tolist()))
 
     def on_timer(self):
         now = self.get_clock().now()

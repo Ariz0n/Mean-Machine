@@ -1,0 +1,34 @@
+<!-- Дерево поведения: раз в секунду перестраиваем путь (карта растет по ходу), едем по нему.
+     Если не получилось - по очереди пробуем: очистить локальную карту, очистить обе карты,
+     чуть-чуть отъехать назад (0.1 м медленно, с проверкой, что сзади свободно). И снова едем.
+     Цель не бросаем: попыток очень много. -->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="1000" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="2" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="2" name="FollowPath">
+          <FollowPath path="{path}" controller_id="FollowPath"/>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      <RoundRobin name="RecoveryActions">
+        <Sequence name="ClearLocal">
+          <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+          <Wait wait_duration="1"/>
+        </Sequence>
+        <Sequence name="ClearBoth">
+          <ClearEntireCostmap name="ClearLocalCostmap-Both" service_name="local_costmap/clear_entirely_local_costmap"/>
+          <ClearEntireCostmap name="ClearGlobalCostmap-Both" service_name="global_costmap/clear_entirely_global_costmap"/>
+          <Wait wait_duration="1"/>
+        </Sequence>
+        <BackUp backup_dist="0.10" backup_speed="0.05"/>
+      </RoundRobin>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>
